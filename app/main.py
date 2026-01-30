@@ -2,9 +2,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from pathlib import Path
-from app.routes import bots, rtmp
+import logging
+import sys
+
+from app.routes import bots, rtmp, analysis, live
 from app.config import settings
 import httpx
+
+# Ensure app loggers show in uvicorn console (single handler on "app" to avoid duplicate lines)
+_app_log = logging.getLogger("app")
+_app_log.setLevel(logging.INFO)
+if not _app_log.handlers:
+    _h = logging.StreamHandler(sys.stderr)
+    _h.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    _app_log.addHandler(_h)
 
 app = FastAPI(
     title="Universal Meeting Bot",
@@ -24,6 +35,8 @@ app.add_middleware(
 # Include routers
 app.include_router(bots.router)
 app.include_router(rtmp.router)
+app.include_router(analysis.router)
+app.include_router(live.router)
 
 
 @app.get("/")
@@ -61,6 +74,15 @@ async def stream_viewer():
     if viewer_path.exists():
         return FileResponse(viewer_path)
     return {"error": "Stream viewer not found"}
+
+
+@app.get("/hipaa-dashboard")
+async def hipaa_dashboard():
+    """Serve the HIPAA compliance analysis dashboard."""
+    dashboard_path = Path("hipaa_dashboard.html")
+    if dashboard_path.exists():
+        return FileResponse(dashboard_path)
+    return {"error": "HIPAA dashboard not found"}
 
 
 @app.get("/hls/{stream_key:path}")

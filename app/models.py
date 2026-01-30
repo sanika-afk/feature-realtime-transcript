@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
 
 class CreateBotRequest(BaseModel):
@@ -20,6 +20,10 @@ class CreateBotRequest(BaseModel):
     stream_key: Optional[str] = Field(
         default=None,
         description="Custom stream key for RTMP. If not provided, will be auto-generated"
+    )
+    events: Optional[List[str]] = Field(
+        default=None,
+        description="WebSocket events for live bot only (e.g. audio_mixed_raw.data, transcript.data, video_separate_png.data)"
     )
 
 
