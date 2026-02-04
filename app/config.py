@@ -29,15 +29,14 @@ class Settings(BaseSettings):
     GOOGLE_CLOUD_API_KEY: Optional[str] = None  # API key for Video Intelligence API (alternative to service account)
     GOOGLE_CLOUD_LOCATION: str = "us-central1"  # Default location for Video Intelligence API
     
-    # Google Gemini API Configuration
-    GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-2.0-flash-exp"  # Use gemini-2.0-flash-exp or gemini-1.5-pro
-    
-    # Gemini Live API (real-time multimodal over WebSocket)
-    GEMINI_LIVE_MODEL: str = "gemini-2.5-flash-native-audio-preview-12-2025"
+
     
     # Public WebSocket URL for Recall.ai to connect to (e.g. wss://your-domain.com/ws/recall)
     PUBLIC_WS_URL: Optional[str] = None
+    
+    # OpenAI API Configuration
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o"
     
     class Config:
         env_file = ".env"

@@ -2,10 +2,10 @@
 Real-time HIPAA Compliance Analysis Routes
 Analyzes medical consultation videos for HIPAA compliance using AI.
 
-IMPORTANT: All analysis is performed by AI models (Video Intelligence API and Gemini).
+IMPORTANT: All analysis is performed by AI models (Video Intelligence API and OpenAI).
 This backend:
 1. Extracts frames from RTMP stream
-2. Sends frames to both Video Intelligence API and Gemini for comparison
+2. Sends frames to both Video Intelligence API and OpenAI for comparison
 3. Analyzes audio for disturbances
 4. Forwards AI analysis results to clients via WebSocket
 
@@ -20,8 +20,7 @@ import json
 from app.config import settings
 from app.rtmp_capture import RTMPStreamCapture
 from app.video_intelligence_client import VideoIntelligenceStreamingClient
-from app.gemini_client import GeminiClient
-from app.hipaa_analyzer import HIPAAComplianceAnalyzer
+from app.openai_client import OpenAIClient
 from google.cloud.videointelligence_v1 import Feature
 
 logger = logging.getLogger(__name__)
@@ -67,11 +66,8 @@ async def start_analysis(
             api_key=settings.GOOGLE_CLOUD_API_KEY
         )
         
-        # Initialize Gemini client
-        gemini_client = GeminiClient(api_key=settings.GEMINI_API_KEY)
-        
-        # Initialize HIPAA analyzer
-        hipaa_analyzer = HIPAAComplianceAnalyzer(vi_client, gemini_client)
+        # Initialize OpenAI client
+        openai_client = OpenAIClient(api_key=settings.OPENAI_API_KEY)
         
         # Store session
         session_id = f"{stream_key}_{asyncio.get_event_loop().time()}"
@@ -80,8 +76,7 @@ async def start_analysis(
             "rtmp_url": rtmp_url,
             "capture": capture,
             "vi_client": vi_client,
-            "gemini_client": gemini_client,
-            "hipaa_analyzer": hipaa_analyzer,
+            "openai_client": openai_client,
             "fps": fps,
             "status": "starting"
         }
@@ -91,7 +86,7 @@ async def start_analysis(
             "stream_key": stream_key,
             "rtmp_url": rtmp_url,
             "analysis_type": "HIPAA Compliance & Medical Interpreter QA",
-            "apis_used": ["Video Intelligence API", "Gemini"],
+            "apis_used": ["Video Intelligence API", "OpenAI"],
             "fps": fps,
             "status": "started",
             "websocket_url": f"/api/analysis/stream/{session_id}"
@@ -120,7 +115,7 @@ async def stream_analysis(websocket: WebSocket, session_id: str):
     
     session = active_sessions[session_id]
     capture = session["capture"]
-    hipaa_analyzer = session["hipaa_analyzer"]
+    openai_client = session["openai_client"]
     
     async def _process_audio_stream(audio_stream):
         """Process audio stream for disturbance detection (placeholder for future implementation)."""
@@ -151,8 +146,8 @@ async def stream_analysis(websocket: WebSocket, session_id: str):
                 async for frame in frame_stream:
                     frame_count += 1
                     
-                    # Analyze frame with both APIs (AI handles all logic)
-                    analysis_result = await hipaa_analyzer.analyze_frame_dual(frame)
+                    # Analyze frame with OpenAI (AI handles all logic)
+                    analysis_result = await openai_client.analyze_frame(frame)
                     
                     # Send comprehensive analysis results
                     await websocket.send_json({
@@ -162,13 +157,15 @@ async def stream_analysis(websocket: WebSocket, session_id: str):
                         "timestamp": asyncio.get_event_loop().time()
                     })
                     
-                    # Check for critical violations
-                    compliance_status = analysis_result.get("combined_analysis", {}).get("compliance_status")
-                    if compliance_status in ["NON_COMPLIANT", "CRITICAL_VIOLATIONS"]:
+                    
+                    # Check for critical violations based on HIPAA compliance score
+                    hipaa_compliance = analysis_result.get("hipaa_compliance", {})
+                    compliance_score = hipaa_compliance.get("compliance_score", 100)
+                    if compliance_score < 70:
                         await websocket.send_json({
                             "type": "compliance_alert",
-                            "severity": compliance_status,
-                            "details": analysis_result.get("combined_analysis", {}),
+                            "severity": "CRITICAL" if compliance_score < 50 else "WARNING",
+                            "details": hipaa_compliance,
                             "timestamp": asyncio.get_event_loop().time()
                         })
                 
@@ -227,8 +224,7 @@ async def get_analysis_status(session_id: str):
         "session_id": session_id,
         "stream_key": session["stream_key"],
         "status": session["status"],
-        "fps": session.get("fps", 1),
-        "summary": session.get("hipaa_analyzer").get_summary() if session.get("hipaa_analyzer") and hasattr(session.get("hipaa_analyzer"), "get_summary") else None
+        "fps": session.get("fps", 1)
     }
 
 

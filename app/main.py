@@ -85,6 +85,15 @@ async def hipaa_dashboard():
     return {"error": "HIPAA dashboard not found"}
 
 
+@app.get("/compliance-monitor")
+async def compliance_monitor():
+    """Serve the dedicated meeting compliance monitor dashboard."""
+    path = Path("compliance_monitor.html")
+    if path.exists():
+        return FileResponse(path)
+    return {"error": "Compliance monitor not found"}
+
+
 @app.get("/hls/{stream_key:path}")
 async def proxy_hls_stream(stream_key: str):
     """

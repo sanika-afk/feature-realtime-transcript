@@ -1,8 +1,8 @@
 """
-Recall AI WebSocket receiver and bridge to Gemini Multimodal Live API.
+Recall AI WebSocket receiver for real-time meeting analysis.
 - POST /bot: Create a Recall bot that streams via WebSocket (needs PUBLIC_WS_URL).
 - /ws/recall: Recall.ai connects here and pushes video/audio/transcript events.
-- /ws/analysis: Dashboard clients connect to receive real-time analysis from Gemini Live.
+- /ws/analysis: Dashboard clients connect to receive real-time analysis from OpenAI.
 - GET /stats: Returns counts of received events (for testing video/audio streams).
 """
 import asyncio
@@ -10,7 +10,8 @@ import base64
 import json
 import logging
 import time
-from typing import Optional, Set, Any, Dict
+from typing import Optional, Set, Any, Dict, List
+from collections import deque
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -21,6 +22,8 @@ from app.models import CreateBotRequest, BotResponse
 from app.recall_client import RecallAIClient
 from app.routes.bots import parse_meeting_url
 
+from app.openai_client import OpenAIClient
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/live", tags=["live"])
@@ -29,13 +32,12 @@ recall_client = RecallAIClient()
 # Subscribers that receive real-time analysis (e.g. dashboard)
 _analysis_subscribers: Set[WebSocket] = set()
 
-# Last received frame (PNG or JPEG bytes) and transcript - consumed by Gemini Live bridge at 1 FPS
+# Last received frame (PNG or JPEG bytes) and transcript
 _frame_queue: asyncio.Queue = asyncio.Queue(maxsize=5)
 _transcript_queue: asyncio.Queue = asyncio.Queue(maxsize=50)
 
-# One active Recall connection per "session"; bridge runs while connected
+# One active Recall connection per "session"
 _recall_ws: Optional[WebSocket] = None
-_bridge_task: Optional[asyncio.Task] = None
 
 # Stream stats: event counts and last event time (for testing)
 _stream_stats: Dict[str, Any] = {
@@ -48,6 +50,22 @@ _stream_stats: Dict[str, Any] = {
 # Latest video frame from Recall (for MJPEG / HTML viewer)
 _latest_frame: Optional[bytes] = None
 _latest_frame_mime: str = "image/png"  # Recall sends PNG
+
+# Compliance analysis state
+_recent_frames: deque = deque(maxlen=20)   # Buffer of recent frames
+_transcript_buffer: List[str] = []         # Buffer for partial transcript snippets
+_openai_client: Optional[OpenAIClient] = None
+_latest_analysis: Optional[Dict[str, Any]] = None
+
+if settings.OPENAI_API_KEY:
+    try:
+        _openai_client = OpenAIClient()
+        logger.info("[LIVE] OpenAIClient initialized for background compliance analysis.")
+        logger.info("[LIVE] Using model: %s", _openai_client.model_id)
+    except Exception as e:
+        logger.error("[LIVE] Failed to initialize OpenAIClient: %s", e)
+else:
+    logger.warning("[LIVE] OPENAI_API_KEY is missing! OpenAI analysis will not run.")
 
 
 async def _broadcast_analysis(data: dict) -> None:
@@ -72,9 +90,9 @@ def _record_stream_event(event: str) -> None:
     events[event] = events.get(event, 0) + 1
     _stream_stats["last_event_at"] = time.time()
     _stream_stats["last_event_type"] = event
-    # Log every 50th event per type to avoid spam
+    # Log every 50th event per type to avoid spam (DEBUG level)
     if events[event] % 50 == 1:
-        logger.info("Recall stream: %s count=%d", event, events[event])
+        logger.debug("Recall stream: %s count=%d", event, events[event])
 
 
 MJPEG_BOUNDARY = "frame"
@@ -127,49 +145,181 @@ def _viewer_html(stream_url: str, stats_url: str) -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Recall Stream</title>
+    <title>Live Meeting Analysis - OpenAI</title>
     <style>
         * { box-sizing: border-box; }
-        body { font-family: system-ui, sans-serif; margin: 0; background: #111; color: #eee; padding: 1rem; }
-        h1 { margin: 0 0 0.5rem 0; font-size: 1.25rem; }
-        .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
-        a { color: #6af; }
-        .video-wrap { background: #000; border-radius: 8px; overflow: hidden; max-width: 100%; }
-        .video-wrap img { display: block; width: 100%; height: auto; max-height: 80vh; object-fit: contain; }
-        #stats { font-size: 0.875rem; color: #888; }
-        .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; margin-right: 0.5rem; }
-        .badge.connected { background: #2a2; color: #fff; }
-        .badge.disconnected { background: #622; color: #fff; }
+        body { font-family: 'Inter', system-ui, sans-serif; margin: 0; background: #0a0a0c; color: #f0f0f5; padding: 2rem; display: grid; grid-template-columns: 1fr 350px; gap: 2rem; height: 100vh; }
+        .main-content { overflow: hidden; display: flex; flex-direction: column; gap: 1rem; }
+        .sidebar { background: #16161d; border-radius: 12px; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; overflow-y: auto; border: 1px solid #2d2d3d; }
+        h1 { margin: 0; font-size: 1.5rem; background: linear-gradient(90deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .video-wrap { background: #000; border-radius: 12px; overflow: hidden; border: 1px solid #2d2d3d; flex-grow: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+        .video-wrap img { width: 100%; height: 100%; object-fit: contain; }
+        .overlay { position: absolute; top: 1rem; right: 1rem; }
+        .badge { padding: 0.4rem 0.8rem; border-radius: 20px; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge.connected { background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid #22c55e; }
+        .badge.disconnected { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }
+        .analysis-card { background: #1f1f29; border-radius: 10px; padding: 1rem; border-left: 4px solid #60a5fa; }
+        .analysis-card h3 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #94a3b8; text-transform: uppercase; }
+        .status-compliant { border-left-color: #22c55e; }
+        .status-violation { border-left-color: #ef4444; }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+        .stat-item { background: #0f172a; padding: 0.75rem; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 1.25rem; font-weight: 700; color: #fff; }
+        .stat-label { font-size: 0.7rem; color: #94a3b8; margin-top: 0.25rem; }
+        .transcript-box { background: #0f172a; padding: 1rem; border-radius: 8px; font-size: 0.9rem; line-height: 1.5; color: #cbd5e1; font-style: italic; max-height: 150px; overflow-y: auto; position: relative; }
+        .partial-flag { font-size: 0.6rem; color: #60a5fa; position: absolute; top: 0.5rem; right: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold; }
+        .summary-box { background: #1e293b; padding: 1rem; border-radius: 8px; margin-top: 1rem; font-size: 0.9rem; border-top: 2px solid #60a5fa; }
+        .noise-alert { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #f87171; padding: 0.5rem; border-radius: 6px; font-size: 0.8rem; margin-top: 0.5rem; display: none; }
+        pre { background: #000; padding: 1rem; border-radius: 8px; font-size: 0.75rem; color: #64748b; overflow-x: auto; margin: 0; }
+        @media (max-width: 1000px) { body { grid-template-columns: 1fr; height: auto; } .sidebar { height: 500px; } }
     </style>
 </head>
 <body>
-    <h1>Recall video stream (live)</h1>
-    <div class="toolbar">
-        <span id="status" class="badge disconnected">No stream</span>
-        <a href="/api/live/stats" target="_blank">Stats JSON</a>
+    <div class="main-content">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>Universal Meeting Bot Live</h1>
+            <span id="status" class="badge disconnected">Disconnected</span>
+        </div>
+        <div class="video-wrap">
+            <img id="stream" src="" alt="Meeting Stream" />
+        </div>
+        <div class="analysis-card" id="latest-transcript-card">
+            <h3>Transcript Feed <span id="transcript-type" class="partial-flag"></span></h3>
+            <div id="latest-transcript" class="transcript-box">Waiting for audio...</div>
+            <div id="noise-alert" class="noise-alert">⚠ NOISE DETECTED: <span id="noise-desc"></span></div>
+        </div>
+        <div class="summary-box" id="discussion-summary-box" style="display: none;">
+            <h3 style="font-size: 0.8rem; color: #94a3b8; margin: 0 0 0.5rem 0; text-transform: uppercase;">Discussion Insight</h3>
+            <div id="discussion-summary" style="line-height: 1.4; color: #e2e8f0;"></div>
+        </div>
     </div>
-    <div class="video-wrap">
-        <img id="stream" src="" alt="Live stream" />
+    
+    <div class="sidebar">
+        <div class="analysis-card" id="compliance-card">
+            <h3>OpenAI Analysis</h3>
+            <div id="compliance-status" style="font-size: 1.2rem; font-weight: bold; margin-bottom: 0.5rem;">Waiting for frames...</div>
+            <div id="compliance-notes" style="font-size: 0.85rem; color: #94a3b8;">Analysis will appear as the meeting progresses.</div>
+            
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-value" id="person-count">--</div>
+                    <div class="stat-label">Person Count</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="security-score">--</div>
+                    <div class="stat-label">Compliance Score</div>
+                </div>
+            </div>
+            
+            <div id="professionalism-info" style="margin-top: 1rem; font-size: 0.8rem;">
+                <div id="prof-badge" style="display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: bold; margin-bottom: 0.3rem;"></div>
+                <div id="prof-note" style="color: #94a3b8;"></div>
+            </div>
+        </div>
+
+        <div>
+            <h3 style="font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem;">Raw Stream Stats</h3>
+            <pre id="stats">Connecting to stats API...</pre>
+        </div>
     </div>
-    <pre id="stats">Connecting...</pre>
+
     <script>
         const streamUrl = """ + json.dumps(stream_url) + """;
         const statsUrl = """ + json.dumps(stats_url) + """;
         const img = document.getElementById("stream");
         const statusEl = document.getElementById("status");
         const statsEl = document.getElementById("stats");
+        
         img.src = streamUrl;
-        img.onload = () => { statusEl.textContent = "Stream active"; statusEl.className = "badge connected"; };
-        img.onerror = () => { statusEl.textContent = "No frames yet"; statusEl.className = "badge disconnected"; };
+        img.onload = () => { statusEl.textContent = "Stream Active"; statusEl.className = "badge connected"; };
+        img.onerror = () => { statusEl.textContent = "No Frames"; statusEl.className = "badge disconnected"; };
+
         async function refreshStats() {
             try {
                 const r = await fetch(statsUrl);
                 const j = await r.json();
-                statsEl.textContent = JSON.stringify(j, null, 2);
-                if (j.connected) statusEl.textContent = "Connected • " + (j.last_event_type || "—");
-                statusEl.className = "badge " + (j.connected ? "connected" : "disconnected");
-            } catch (e) { statsEl.textContent = "Stats: " + e.message; }
+                
+                // Update raw stats display
+                statsEl.textContent = JSON.stringify({events: j.events, last_event: j.last_event_type}, null, 2);
+                
+                // Update Badge
+                if (j.connected) {
+                    statusEl.textContent = "Connected • " + (j.last_event_type || "Active");
+                    statusEl.className = "badge connected";
+                } else {
+                    statusEl.textContent = "Disconnected";
+                    statusEl.className = "badge disconnected";
+                }
+
+                // Update OpenAI Analysis results if available
+                if (j.latest_analysis) {
+                    updateAnalysisUI(j.latest_analysis);
+                }
+
+            } catch (e) { statsEl.textContent = "Error: " + e.message; }
         }
+
+        function updateAnalysisUI(data) {
+            const analysis = data.analysis;
+            const transcript = data.transcript;
+            
+            document.getElementById("latest-transcript").textContent = '"' + transcript + '"';
+            document.getElementById("transcript-type").textContent = data.is_partial ? "Real-time" : "Final";
+            
+            if (analysis && !analysis.error) {
+                // Core scores
+                const score = analysis.hipaa_compliance?.compliance_score || 0;
+                document.getElementById("person-count").textContent = analysis.person_count || "0";
+                document.getElementById("security-score").textContent = score + "%";
+                
+                const statusEl = document.getElementById("compliance-status");
+                const cardEl = document.getElementById("compliance-card");
+                
+                if (score >= 80) {
+                    statusEl.textContent = "✅ COMPLIANT";
+                    statusEl.style.color = "#4ade80";
+                    cardEl.className = "analysis-card status-compliant";
+                } else {
+                    statusEl.textContent = "⚠ ATTENTION REQUIRED";
+                    statusEl.style.color = "#f87171";
+                    cardEl.className = "analysis-card status-violation";
+                }
+                
+                let notes = "";
+                if (analysis.hipaa_compliance?.violations?.length > 0) {
+                    notes = "Issues: " + analysis.hipaa_compliance.violations.join(", ");
+                } else {
+                    notes = "No violations detected in the last analyzed frame.";
+                }
+                document.getElementById("compliance-notes").textContent = notes;
+
+                // Enhanced fields: Professionalism
+                const profBadge = document.getElementById("prof-badge");
+                const env = analysis.environment_analysis;
+                if (env) {
+                    profBadge.textContent = env.is_professional ? "PROFESSIONAL" : "NON-PROFESSIONAL";
+                    profBadge.style.background = env.is_professional ? "rgba(34, 197, 94, 0.2)" : "rgba(245, 158, 11, 0.2)";
+                    profBadge.style.color = env.is_professional ? "#4ade80" : "#fbbf24";
+                    document.getElementById("prof-note").textContent = env.professionalism_note || "";
+                }
+
+                // Enhanced fields: Summary
+                if (analysis.discussion_summary) {
+                    document.getElementById("discussion-summary-box").style.display = "block";
+                    document.getElementById("discussion-summary").textContent = analysis.discussion_summary;
+                }
+
+                // Enhanced fields: Noise
+                const noiseAlert = document.getElementById("noise-alert");
+                if (analysis.noise_detection?.detected) {
+                    noiseAlert.style.display = "block";
+                    document.getElementById("noise-desc").textContent = analysis.noise_detection.description;
+                } else {
+                    noiseAlert.style.display = "none";
+                }
+            }
+        }
+        
         refreshStats();
         setInterval(refreshStats, 3000);
     </script>
@@ -188,6 +338,7 @@ async def get_stream_stats() -> Dict[str, Any]:
         "events": dict(_stream_stats["events"]),
         "last_event_at": _stream_stats["last_event_at"],
         "last_event_type": _stream_stats["last_event_type"],
+        "latest_analysis": _latest_analysis
     }
 
 
@@ -227,59 +378,42 @@ def _decode_frame_from_event(data: Any) -> Optional[bytes]:
     return None
 
 
-async def _gemini_live_bridge() -> None:
-    """Consume frames from _frame_queue at ~1 FPS and run Gemini Live; broadcast analysis."""
-    logger.info("[GEMINI-BRIDGE] Task started.")
-    try:
-        from app.gemini_live_client import GeminiLiveClient
-    except ImportError as e:
-        logger.warning("[GEMINI-BRIDGE] Skipped (import error): %s", e)
-        return
-    if not settings.GEMINI_API_KEY:
-        logger.warning("[GEMINI-BRIDGE] Skipped: GEMINI_API_KEY not set. Set it in .env to enable Gemini Live.")
+async def _run_openai_analysis(text: str, frame: bytes) -> None:
+    """Run structured compliance analysis using OpenAI on a sentence + frame and broadcast."""
+    logger.info("[COMPLIANCE-OPENAI] _run_openai_analysis called with text: %s", text[:50])
+    if not _openai_client:
+        logger.warning("[COMPLIANCE-OPENAI] OpenAIClient not available; skipping analysis.")
         return
 
-    async def frame_generator():
-        while True:
-            try:
-                frame = await asyncio.wait_for(_frame_queue.get(), timeout=30.0)
-                if frame is None:
-                    break
-                yield frame
-            except asyncio.TimeoutError:
-                await asyncio.sleep(0.2)
-                continue
-            except asyncio.CancelledError:
-                break
-
-    async def transcript_generator():
-        while True:
-            try:
-                text = await asyncio.wait_for(_transcript_queue.get(), timeout=0.5)
-                if text is None:
-                    break
-                yield text
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-
-    async def on_analysis(msg: dict) -> None:
-        await _broadcast_analysis(msg)
-
-    client = GeminiLiveClient()
-    logger.info("[GEMINI-BRIDGE] Started; waiting for first video frame from Recall, then connecting to Gemini.")
+    logger.info("[COMPLIANCE-OPENAI] Starting analysis for sentence: %s...", text[:50])
     try:
-        await client.run_live_session(
-            frame_iterator=frame_generator(),
-            transcript_iterator=transcript_generator(),
-            analysis_callback=on_analysis,
-        )
-    except asyncio.CancelledError:
-        pass
+        # Detect MIME type
+        mime = "image/png" if frame.startswith(b"\x89PNG") else "image/jpeg"
+        
+        # Call OpenAI analysis
+        analysis = await _openai_client.analyze_frame(frame, audio_transcript=text, mime_type=mime)
+        
+        # Store for the REST stats / HTML viewer
+        global _latest_analysis
+        _latest_analysis = {
+            "transcript": text,
+            "analysis": analysis,
+            "is_partial": False,
+            "timestamp": time.time()
+        }
+
+        # Broadcast the structured result to the dashboard
+        await _broadcast_analysis({
+            "event": "compliance_analysis",
+            "data": _latest_analysis
+        })
+        logger.info("[COMPLIANCE-OPENAI] Analysis broadcasted.")
     except Exception as e:
-        logger.exception("Gemini Live bridge error: %s", e)
-        await _broadcast_analysis({"error": str(e), "text": str(e)})
+        logger.error("[COMPLIANCE-OPENAI] Analysis failed: %s", e)
+        await _broadcast_analysis({
+            "event": "compliance_error",
+            "data": {"error": str(e), "transcript": text}
+        })
 
 
 @router.post("/bot", response_model=BotResponse, status_code=status.HTTP_201_CREATED)
@@ -338,9 +472,9 @@ async def websocket_recall(websocket: WebSocket) -> None:
     """
     Recall.ai connects to this endpoint (use PUBLIC_WS_URL when creating the bot).
     Receives events: video_separate_png.data, transcript.data, audio_mixed_raw.data, etc.
-    Frames are pushed to the Gemini Live bridge at 1 FPS.
+    Frames and transcripts are processed for OpenAI analysis.
     """
-    global _recall_ws, _bridge_task, _stream_stats
+    global _recall_ws, _stream_stats
     logger.info("Recall WebSocket: connection attempt received")
     try:
         await websocket.accept()
@@ -350,64 +484,110 @@ async def websocket_recall(websocket: WebSocket) -> None:
     _recall_ws = websocket
     _stream_stats["connected"] = True
     _stream_stats["events"] = {}
-    logger.info("[LIVE] Recall WebSocket connected; starting Gemini Live bridge.")
-    try:
-        _bridge_task = asyncio.create_task(_gemini_live_bridge())
-    except Exception as e:
-        logger.exception("Recall WebSocket: bridge task create failed: %s", e)
+    logger.info("[LIVE] Recall WebSocket connected.")
     try:
         while True:
-            raw = await websocket.receive_text()
             try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                if isinstance(raw, bytes):
-                    _frame_queue.put_nowait(raw)
-                continue
-            event = msg.get("event") or msg.get("event_type")
-            data = msg.get("data") or msg
-            if not event:
-                continue
-            _record_stream_event(event)
-            if event in ("video_separate_png.data", "video_mixed_flv.data"):
-                frame = _decode_frame_from_event(data)
-                if frame:
-                    global _latest_frame, _latest_frame_mime
-                    _latest_frame = frame
-                    _latest_frame_mime = "image/png" if event == "video_separate_png.data" else "image/jpeg"
-                    try:
-                        _frame_queue.put_nowait(frame)
-                    except asyncio.QueueFull:
-                        _frame_queue.get_nowait()
-                        _frame_queue.put_nowait(frame)
-                    # Log so we know frames are reaching the bridge (first + every 50th)
-                    n = _stream_stats["events"].get(event, 0)
-                    if n == 1 or n % 50 == 0:
-                        logger.info("[GEMINI-BRIDGE] Video frame queued (%d bytes, %s #%d)", len(frame), event, n)
-                else:
-                    # Decode failed — log first and every 100th so we can fix payload handling
-                    n = _stream_stats["events"].get(event, 0)
-                    if n <= 1 or n % 100 == 0:
-                        keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
-                        logger.warning("[GEMINI-BRIDGE] Failed to decode video (event #%s). data keys: %s", n, keys)
-            elif event == "audio_mixed_raw.data":
-                # Audio received (counted above). Optionally forward to bridge later.
-                pass
-            elif event in ("transcript.data", "transcript.partial_data"):
-                inner = data.get("data") if isinstance(data, dict) else data
-                text = None
-                if isinstance(inner, dict):
-                    text = inner.get("text") or inner.get("transcript") or inner.get("utterance")
-                    if text is None and inner.get("words"):
-                        text = " ".join(w.get("text", "") for w in inner["words"])
-                elif isinstance(inner, str):
-                    text = inner
-                if text:
-                    try:
-                        _transcript_queue.put_nowait(text)
-                    except asyncio.QueueFull:
-                        _transcript_queue.get_nowait()
-                        _transcript_queue.put_nowait(text)
+                raw = await websocket.receive_text()
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    if isinstance(raw, bytes):
+                        _frame_queue.put_nowait(raw)
+                    continue
+                
+                event = msg.get("event") or msg.get("event_type")
+                data = msg.get("data") or msg
+                if not event:
+                    continue
+                
+                _record_stream_event(event)
+
+                if event in ("video_separate_png.data", "video_mixed_flv.data"):
+                    frame = _decode_frame_from_event(data)
+                    if frame:
+                        global _latest_frame, _latest_frame_mime
+                        _latest_frame = frame
+                        _latest_frame_mime = "image/png" if event == "video_separate_png.data" else "image/jpeg"
+                        _recent_frames.append(frame)  # Keep for compliance selection
+                        try:
+                            _frame_queue.put_nowait(frame)
+                        except asyncio.QueueFull:
+                            _frame_queue.get_nowait()
+                            _frame_queue.put_nowait(frame)
+                        # Log so we know frames are reaching the bridge (first + every 50th)
+                        n = _stream_stats["events"].get(event, 0)
+                        if n == 1 or n % 50 == 0:
+                            logger.debug("[GEMINI-BRIDGE] Video frame queued (%d bytes, %s #%d)", len(frame), event, n)
+                    else:
+                        # Decode failed — log first and every 100th so we can fix payload handling
+                        n = _stream_stats["events"].get(event, 0)
+                        if n <= 1 or n % 100 == 0:
+                            keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+                            logger.warning("[GEMINI-BRIDGE] Failed to decode video (event #%s). data keys: %s", n, keys)
+                
+                elif event == "audio_mixed_raw.data":
+                    # Audio received (counted above). Optionally forward to bridge later.
+                    pass
+                
+                elif event in ("transcript.data", "transcript.partial_data"):
+                    inner = data.get("data") if isinstance(data, dict) and "data" in data else data
+                    text = None
+                    if isinstance(inner, dict):
+                        text = inner.get("text") or inner.get("transcript") or inner.get("utterance")
+                        if text is None and inner.get("words"):
+                            text = " ".join(w.get("text", "") for w in inner["words"])
+                    elif isinstance(inner, str):
+                        text = inner
+                    
+                    if text:
+                        if event == "transcript.partial_data":
+                            # Log partials at INFO level for terminal visibility as requested
+                            logger.info("[TRANSCRIPT] Real-time: %s", text)
+                            print(f"\r[TRANSCRIPT] {text}", end="", flush=True) 
+                            _transcript_buffer.append(text)
+                            
+                            # Update latest analysis state for polling clients
+                            global _latest_analysis
+                            _latest_analysis = {
+                                "transcript": text,
+                                "analysis": _latest_analysis.get("analysis") if _latest_analysis else None,
+                                "is_partial": True,
+                                "timestamp": time.time()
+                            }
+                            
+                            # Broadcast partial transcript in real-time
+                            await _broadcast_analysis({
+                                "event": "transcript_update",
+                                "data": _latest_analysis
+                            })
+                        else:  # transcript.data (Final utterance)
+                            print(f"\n[TRANSCRIPT] Final: {text}")
+                            full_sentence = " ".join(_transcript_buffer + [text])
+                            _transcript_buffer.clear()
+                            
+                            logger.info("[TRANSCRIPT] Final: %s", full_sentence)
+                            
+                            # Trigger compliance analysis if we have a frame
+                            logger.info("[COMPLIANCE] Final transcript received. Buffer size: %d frames.", len(_recent_frames))
+                            if _recent_frames:
+                                # Use the most recent frame as the representative one
+                                rep_frame = _recent_frames[-1]
+                                logger.info("[COMPLIANCE] Triggering OpenAI analysis task for: %s", full_sentence[:50])
+                                asyncio.create_task(_run_openai_analysis(full_sentence, rep_frame))
+                            else:
+                                logger.warning("[COMPLIANCE] No frames available in buffer for analysis.")
+                            
+                            # Still push to the continuous bridge queue
+                            try:
+                                _transcript_queue.put_nowait(full_sentence)
+                            except asyncio.QueueFull:
+                                _transcript_queue.get_nowait()
+                                _transcript_queue.put_nowait(full_sentence)
+            except Exception as e:
+                logger.exception("Error in Recall WebSocket message loop: %s", e)
+                print(f"Error in Recall WebSocket loop: {e}")
+                break
     except WebSocketDisconnect:
         logger.info("Recall WebSocket disconnected")
     except Exception as e:
@@ -415,15 +595,28 @@ async def websocket_recall(websocket: WebSocket) -> None:
     finally:
         _recall_ws = None
         _stream_stats["connected"] = False
-        if _bridge_task:
-            _bridge_task.cancel()
+        
+        # Signal queues to stop by putting None (and handle full queue)
+        try:
+            _frame_queue.put_nowait(None)
+        except Exception:
+            # If full or any other error, clear one and try once more
             try:
-                await _bridge_task
-            except asyncio.CancelledError:
+                if not _frame_queue.empty():
+                    _frame_queue.get_nowait()
+                _frame_queue.put_nowait(None)
+            except Exception:
                 pass
-            _bridge_task = None
-        _frame_queue.put_nowait(None)
-        _transcript_queue.put_nowait(None)
+
+        try:
+            _transcript_queue.put_nowait(None)
+        except Exception:
+            try:
+                if not _transcript_queue.empty():
+                    _transcript_queue.get_nowait()
+                _transcript_queue.put_nowait(None)
+            except Exception:
+                pass
 
 
 @router.websocket("/ws/analysis")

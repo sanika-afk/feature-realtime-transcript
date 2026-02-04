@@ -99,6 +99,18 @@ async def create_bot(request: CreateBotRequest):
             error_message=bot_data.get("error_message")
         )
     
+    except httpx.HTTPStatusError as e:
+        detail = str(e)
+        try:
+            err_body = e.response.json()
+            detail = f"Recall API error: {err_body}"
+        except Exception:
+            detail = f"Recall API error: {e.response.text if hasattr(e.response, 'text') else str(e)}"
+        
+        raise HTTPException(
+            status_code=e.response.status_code if e.response.status_code >= 400 and e.response.status_code < 500 else status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=detail
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -145,9 +157,17 @@ async def get_bot(bot_id: str):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Bot not found"
             )
+        
+        detail = str(e)
+        try:
+            err_body = e.response.json()
+            detail = f"Recall API error: {err_body}"
+        except Exception:
+            detail = f"Recall API error: {e.response.text if hasattr(e.response, 'text') else str(e)}"
+            
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get bot: {str(e)}"
+            detail=detail
         )
     except Exception as e:
         raise HTTPException(
@@ -180,6 +200,18 @@ async def list_bots(limit: int = 10, offset: int = 0):
                 error_message=bot.get("error_message")
             ))
         return result
+    except httpx.HTTPStatusError as e:
+        detail = str(e)
+        try:
+            err_body = e.response.json()
+            detail = f"Recall API error: {err_body}"
+        except Exception:
+            detail = f"Recall API error: {e.response.text if hasattr(e.response, 'text') else str(e)}"
+            
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=detail
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -199,9 +231,17 @@ async def delete_bot(bot_id: str):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Bot not found"
             )
+        
+        detail = str(e)
+        try:
+            err_body = e.response.json()
+            detail = f"Recall API error: {err_body}"
+        except Exception:
+            detail = f"Recall API error: {e.response.text if hasattr(e.response, 'text') else str(e)}"
+            
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete bot: {str(e)}"
+            detail=detail
         )
     except Exception as e:
         raise HTTPException(
