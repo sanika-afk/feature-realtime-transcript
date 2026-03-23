@@ -1,0 +1,4 @@
+Text                                                         | Expected             | Detected             | Result
+------------------------------------------------------------------------------------------------------------------------
+Good morning. How are you feeling today?                     | Doctor               | Doctor               | PASS
+I have a sharp pain in my back since yesterday.              | Patient              | Patient              | PASS

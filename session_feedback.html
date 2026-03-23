@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Feedback - Medical Compliance Review</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 40px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        h1 {
+            color: #64b5f6;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #90caf9;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .form-section {
+            margin-bottom: 30px;
+        }
+
+        .form-section h2 {
+            color: #64b5f6;
+            font-size: 18px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #90caf9;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        textarea {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            color: #e0e0e0;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 120px;
+            font-family: inherit;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #64b5f6;
+        }
+
+        .char-count {
+            text-align: right;
+            font-size: 11px;
+            color: #757575;
+            margin-top: 4px;
+        }
+
+        .tags-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .tag-chip {
+            background: rgba(100, 181, 246, 0.1);
+            border: 1px solid rgba(100, 181, 246, 0.3);
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .tag-chip:hover {
+            background: rgba(100, 181, 246, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .tag-chip.selected {
+            background: linear-gradient(135deg, #42a5f5, #1e88e5);
+            border-color: #1e88e5;
+            color: white;
+        }
+
+        .star-rating {
+            display: flex;
+            gap: 8px;
+            font-size: 32px;
+        }
+
+        .star {
+            cursor: pointer;
+            color: #424242;
+            transition: all 0.2s;
+        }
+
+        .star:hover,
+        .star.active {
+            color: #ffc107;
+            transform: scale(1.1);
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: linear-gradient(135deg, #66bb6a, #43a047);
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+
+        .toggle-switch.active .toggle-slider {
+            left: 33px;
+        }
+
+        .toggle-label {
+            font-size: 14px;
+            color: #e0e0e0;
+        }
+
+        .submit-button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #42a5f5, #1e88e5);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 30px;
+        }
+
+        .submit-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(30, 136, 229, 0.4);
+        }
+
+        .submit-button:active {
+            transform: translateY(0);
+        }
+
+        .success-message {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid #4caf50;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            color: #4caf50;
+            text-align: center;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>📋 Session Feedback & Evaluation</h1>
+        <p class="subtitle">Session ID: 78923 | Date: February 4, 2026</p>
+
+        <form id="feedbackForm">
+            <!-- Overall Notes -->
+            <div class="form-section">
+                <h2>📝 Overall Session Notes</h2>
+                <div class="form-group">
+                    <label for="overallNotes">Provide your general feedback about this session</label>
+                    <textarea id="overallNotes"
+                        placeholder="Enter your observations, concerns, or recommendations..."></textarea>
+                    <div class="char-count"><span id="charCount">0</span> / 1000 characters</div>
+                </div>
+            </div>
+
+            <!-- Tags -->
+            <div class="form-section">
+                <h2>🏷️ Session Tags</h2>
+                <div class="form-group">
+                    <label>Select all applicable tags</label>
+                    <div class="tags-container">
+                        <div class="tag-chip" data-tag="ProfessionalismIssue">#ProfessionalismIssue</div>
+                        <div class="tag-chip" data-tag="BackgroundNoise">#BackgroundNoise</div>
+                        <div class="tag-chip" data-tag="TechnicalGlitch">#TechnicalGlitch</div>
+                        <div class="tag-chip" data-tag="ExcellentQuality">#ExcellentQuality</div>
+                        <div class="tag-chip" data-tag="LanguageBarrier">#LanguageBarrier</div>
+                        <div class="tag-chip" data-tag="InterpreterDelay">#InterpreterDelay</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interpreter Rating -->
+            <div class="form-section">
+                <h2>⭐ Interpreter Performance Rating</h2>
+                <div class="form-group">
+                    <label>Rate the interpreter's overall performance (1-5 stars)</label>
+                    <div class="star-rating" id="starRating">
+                        <span class="star" data-rating="1">★</span>
+                        <span class="star" data-rating="2">★</span>
+                        <span class="star" data-rating="3">★</span>
+                        <span class="star" data-rating="4">★</span>
+                        <span class="star" data-rating="5">★</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coaching Recommendation -->
+            <div class="form-section">
+                <h2>💡 Coaching Recommendation</h2>
+                <div class="form-group">
+                    <label>Would you recommend additional coaching for this interpreter?</label>
+                    <div class="toggle-container">
+                        <div class="toggle-switch" id="coachingToggle">
+                            <div class="toggle-slider"></div>
+                        </div>
+                        <span class="toggle-label" id="coachingLabel">No</span>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-button">📤 Submit Feedback</button>
+        </form>
+
+        <div class="success-message" id="successMessage">
+            ✅ Feedback submitted successfully! Thank you for your review.
+        </div>
+    </div>
+
+    <script>
+        // Character count
+        const overallNotes = document.getElementById('overallNotes');
+        const charCount = document.getElementById('charCount');
+
+        overallNotes.addEventListener('input', () => {
+            const count = overallNotes.value.length;
+            charCount.textContent = count;
+            if (count > 1000) {
+                charCount.style.color = '#f44336';
+            } else {
+                charCount.style.color = '#757575';
+            }
+        });
+
+        // Tags selection
+        const tagChips = document.querySelectorAll('.tag-chip');
+        const selectedTags = new Set();
+
+        tagChips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                const tag = chip.dataset.tag;
+                if (selectedTags.has(tag)) {
+                    selectedTags.delete(tag);
+                    chip.classList.remove('selected');
+                } else {
+                    selectedTags.add(tag);
+                    chip.classList.add('selected');
+                }
+            });
+        });
+
+        // Star rating
+        const stars = document.querySelectorAll('.star');
+        let currentRating = 0;
+
+        stars.forEach(star => {
+            star.addEventListener('click', () => {
+                currentRating = parseInt(star.dataset.rating);
+                updateStars();
+            });
+
+            star.addEventListener('mouseenter', () => {
+                const rating = parseInt(star.dataset.rating);
+                stars.forEach((s, index) => {
+                    if (index < rating) {
+                        s.classList.add('active');
+                    } else {
+                        s.classList.remove('active');
+                    }
+                });
+            });
+        });
+
+        document.getElementById('starRating').addEventListener('mouseleave', () => {
+            updateStars();
+        });
+
+        function updateStars() {
+            stars.forEach((s, index) => {
+                if (index < currentRating) {
+                    s.classList.add('active');
+                } else {
+                    s.classList.remove('active');
+                }
+            });
+        }
+
+        // Coaching toggle
+        const coachingToggle = document.getElementById('coachingToggle');
+        const coachingLabel = document.getElementById('coachingLabel');
+        let recommendCoaching = false;
+
+        coachingToggle.addEventListener('click', () => {
+            recommendCoaching = !recommendCoaching;
+            coachingToggle.classList.toggle('active');
+            coachingLabel.textContent = recommendCoaching ? 'Yes' : 'No';
+        });
+
+        // Form submission
+        const feedbackForm = document.getElementById('feedbackForm');
+        const successMessage = document.getElementById('successMessage');
+
+        feedbackForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const feedbackData = {
+                overall_notes: overallNotes.value,
+                tags: Array.from(selectedTags).map(tag => `#${tag}`),
+                interpreter_rating: currentRating,
+                recommend_coaching: recommendCoaching
+            };
+
+            console.log('Submitting feedback:', feedbackData);
+
+            try {
+                const sessionId = '78923'; // Replace with actual session ID
+                const response = await fetch(`/api/transcripts/${sessionId}/feedback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(feedbackData)
+                });
+
+                if (response.ok) {
+                    successMessage.classList.add('show');
+                    feedbackForm.reset();
+                    selectedTags.clear();
+                    tagChips.forEach(chip => chip.classList.remove('selected'));
+                    currentRating = 0;
+                    updateStars();
+                    recommendCoaching = false;
+                    coachingToggle.classList.remove('active');
+                    coachingLabel.textContent = 'No';
+
+                    // Scroll to success message
+                    successMessage.scrollIntoView({ behavior: 'smooth' });
+
+                    // Hide success message after 5 seconds
+                    setTimeout(() => {
+                        successMessage.classList.remove('show');
+                    }, 5000);
+                } else {
+                    alert('Error submitting feedback. Please try again.');
+                }
+            } catch (error) {
+                console.error('Error submitting feedback:', error);
+                alert('Error submitting feedback. Check console for details.');
+            }
+        });
+    </script>
+</body>
+
+</html>

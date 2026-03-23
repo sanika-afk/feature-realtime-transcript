@@ -1,0 +1,7 @@
+Good morning. How are you feeling today?           | Doctor          | Doctor          | PASS
+I have a sharp pain in my back since yesterda      | Patient         | Patient         | PASS
+The doctor wants to know if you took your med      | Interpreter->Patient | Interpreter→Patient | PASS
+Please take a seat and I'll look into your me      | Doctor          | Doctor          | PASS
+I'm worried about the test results. Is it ser      | Patient         | Patient         | PASS
+
+Final Outcome: 5/5 cases passed.

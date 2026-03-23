@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Stream Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #4CAF50;
+        }
+        .stream-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #333;
+            color: #fff;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        video {
+            width: 100%;
+            max-width: 1280px;
+            background: #000;
+            border-radius: 4px;
+        }
+        .info {
+            background: #333;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        .info code {
+            background: #1a1a1a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #4CAF50;
+        }
+        .error {
+            color: #f44336;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 Meeting Stream Viewer</h1>
+        <p>Enter the stream key to view the meeting stream</p>
+        
+        <div class="stream-input">
+            <input 
+                type="text" 
+                id="streamKey" 
+                placeholder="Enter stream key (e.g., meeting-5)"
+                value=""
+            >
+            <button onclick="loadStream()">Load Stream</button>
+        </div>
+        
+        <video id="videoPlayer" controls></video>
+        
+        <div id="error" class="error"></div>
+        
+        <div class="info">
+            <h3>How to use:</h3>
+            <ol>
+                <li>Create a bot using the API: <code>POST /api/bots/</code></li>
+                <li>Note the stream key from the bot creation response</li>
+                <li>Enter the stream key above and click "Load Stream"</li>
+                <li>The stream will appear once the bot joins the meeting</li>
+            </ol>
+            
+            <h3>Stream URL format:</h3>
+            <code>http://localhost:8000/hls/{stream_key}.m3u8</code>
+            
+            <h3>Example:</h3>
+            <code>http://localhost:8000/hls/meeting-5.m3u8</code>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+        const video = document.getElementById('videoPlayer');
+        const streamKeyInput = document.getElementById('streamKey');
+        const errorDiv = document.getElementById('error');
+        
+        function loadStream() {
+            const streamKey = streamKeyInput.value.trim();
+            if (!streamKey) {
+                showError('Please enter a stream key');
+                return;
+            }
+            
+            // Use FastAPI proxy endpoint (solves CORS issues)
+            const streamUrl = `http://localhost:8000/hls/${streamKey}.m3u8`;
+            
+            // Clear previous error
+            errorDiv.textContent = '';
+            
+            // Check if HLS is supported
+            if (Hls.isSupported()) {
+                const hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+                
+                hls.loadSource(streamUrl);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    console.log('Stream loaded successfully');
+                    video.play().catch(e => {
+                        showError('Autoplay blocked. Click play manually.');
+                    });
+                });
+                
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    if (data.fatal) {
+                        switch(data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                showError('Network error. Is the stream active?');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                showError('Media error. Trying to recover...');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                showError('Fatal error. Stream may not be available yet.');
+                                hls.destroy();
+                                break;
+                        }
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = streamUrl;
+                video.play().catch(e => {
+                    showError('Autoplay blocked. Click play manually.');
+                });
+            } else {
+                showError('HLS is not supported in this browser');
+            }
+        }
+        
+        function showError(message) {
+            errorDiv.textContent = '❌ ' + message;
+        }
+        
+        // Auto-load on Enter key
+        streamKeyInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadStream();
+            }
+        });
+        
+        // Auto-load stream from URL parameter if provided
+        const urlParams = new URLSearchParams(window.location.search);
+        const streamParam = urlParams.get('stream');
+        if (streamParam) {
+            streamKeyInput.value = streamParam;
+            loadStream();
+        }
+    </script>
+</body>
+</html>

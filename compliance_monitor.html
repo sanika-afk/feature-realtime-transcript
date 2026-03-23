@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Meeting Compliance Monitor</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f1f5f9;
+            --primary: #38bdf8;
+            --success: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .connected {
+            background: #065f46;
+            color: #34d399;
+        }
+
+        .disconnected {
+            background: #7f1d1d;
+            color: #f87171;
+        }
+
+        .analysis-card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid var(--primary);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .transcript {
+            font-size: 1.1rem;
+            line-height: 1.5;
+            margin-bottom: 15px;
+            font-style: italic;
+            color: #94a3b8;
+        }
+
+        .compliance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .metric {
+            background: #334155;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .metric-value {
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        .compliant {
+            color: var(--success);
+        }
+
+        .non-compliant {
+            color: var(--danger);
+        }
+
+        .violations {
+            margin-top: 15px;
+            background: #450a0a;
+            color: #fca5a5;
+            padding: 10px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .violations.active {
+            display: block;
+        }
+
+        #no-data {
+            text-align: center;
+            padding: 100px 0;
+            color: #64748b;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Compliance Monitor</h1>
+            <div id="status" class="status disconnected">Disconnected</div>
+        </div>
+
+        <div id="no-data">
+            <p>Waiting for live meeting data...</p>
+            <p style="font-size: 0.8rem;">(Speak a full sentence in the meeting to trigger analysis)</p>
+        </div>
+
+        <div id="feed"></div>
+    </div>
+
+    <script>
+        const feed = document.getElementById('feed');
+        const noData = document.getElementById('no-data');
+        const status = document.getElementById('status');
+
+        // Connect to the Live route's analysis WebSocket
+        const ws = new WebSocket(`ws://${window.location.host}/api/live/ws/analysis`);
+
+        ws.onopen = () => {
+            status.textContent = 'Connected (8001)';
+            status.className = 'status connected';
+        };
+
+        ws.onclose = () => {
+            status.textContent = 'Disconnected';
+            status.className = 'status disconnected';
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.event === 'history_init') {
+                const initData = msg.data;
+                if (initData.history && initData.history.length > 0) {
+                    noData.style.display = 'none';
+                    initData.history.forEach(item => {
+                        createCard(item);
+                    });
+                }
+                if (initData.latest_analysis) {
+                    createCard(initData.latest_analysis);
+                }
+            } else if (msg.event === 'analysis_update' || msg.event === 'transcript_final') {
+                noData.style.display = 'none';
+                createCard(msg.data);
+            }
+        };
+
+        function createCard(data) {
+            const results = data.analysis || {};
+            const card = document.createElement('div');
+            card.className = 'analysis-card';
+
+            const time = data.timestamp || new Date().toLocaleTimeString();
+
+            const risk = (results.risk_level || 'Low').toLowerCase();
+            const riskClass = risk === 'high' ? 'non-compliant' : (risk === 'medium' ? 'warning' : 'compliant');
+
+            const speaker = data.speaker_role || "Unknown";
+            const speakerColor = speaker === "Doctor" ? "#38bdf8" : (speaker === "Patient" ? "#22c55e" : "#8b5cf6");
+
+            card.innerHTML = `
+                <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 10px;">ANALYSIS AT ${time}</div>
+                <div class="transcript">
+                    <span style="color: ${speakerColor}; font-weight: 700; font-style: normal; text-transform: uppercase; font-size: 0.8rem;">${speaker}:</span>
+                    "${data.text}"
+                </div>
+                <div class="compliance-grid">
+                    <div class="metric">
+                        <div class="metric-label">Risk Level</div>
+                        <div class="metric-value ${riskClass}">${results.risk_level || 'LOW'}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Confidence</div>
+                        <div class="metric-value">${results.confidence || 0}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Summary</div>
+                        <div class="metric-value" style="font-weight: 400; font-size: 0.85rem; color: #cbd5e1;">${results.summary || 'No summary provided.'}</div>
+                    </div>
+                </div>
+            `;
+
+            feed.insertBefore(card, feed.firstChild);
+        }
+    </script>
+</body>
+
+</html>

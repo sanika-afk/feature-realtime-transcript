@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HIPAA Compliance & Medical Interpreter QA Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .status-connected {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-disconnected {
+            background: #ef4444;
+            color: white;
+        }
+
+        .status-connecting {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .controls input {
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            margin-right: 10px;
+            width: 200px;
+        }
+
+        .controls button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        .controls button:hover {
+            background: #5568d3;
+        }
+
+        .controls button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .score {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .score-high {
+            background: #10b981;
+            color: white;
+        }
+
+        .score-medium {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .score-low {
+            background: #ef4444;
+            color: white;
+        }
+
+        .compliance-status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-weight: bold;
+            text-align: center;
+            font-size: 18px;
+        }
+
+        .status-compliant {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-minor {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .status-non-compliant {
+            background: #ef4444;
+            color: white;
+        }
+
+        .status-critical {
+            background: #dc2626;
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        .person-list {
+            list-style: none;
+        }
+
+        .person-list li {
+            padding: 8px;
+            margin: 5px 0;
+            background: #f3f4f6;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+        }
+
+        .person-list li::before {
+            content: "✓";
+            color: #10b981;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .person-list li.missing::before {
+            content: "✗";
+            color: #ef4444;
+        }
+
+        .violations-list {
+            list-style: none;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .violations-list li {
+            padding: 8px;
+            margin: 5px 0;
+            background: #fee2e2;
+            border-left: 4px solid #ef4444;
+            border-radius: 5px;
+        }
+
+        .violations-list li:empty {
+            background: #d1fae5;
+            border-left-color: #10b981;
+        }
+
+        .violations-list li:empty::after {
+            content: "No violations";
+            color: #10b981;
+        }
+
+        .speed-comparison {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 15px;
+        }
+
+        .speed-item {
+            text-align: center;
+        }
+
+        .speed-item .time {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .speed-item .label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .faster-badge {
+            background: #10b981;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            margin-top: 5px;
+        }
+
+        .alerts {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .alert {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+
+        .alert-critical {
+            background: #fee2e2;
+            border-left-color: #dc2626;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            border-left-color: #f59e0b;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            border-left-color: #3b82f6;
+        }
+
+        .alert-time {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 10px;
+            background: #f3f4f6;
+            border-radius: 5px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state::before {
+            content: "📊";
+            font-size: 48px;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        /* Video Feed Styles */
+        .video-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            grid-column: span 2;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 15px;
+        }
+
+        .video-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .video-status-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+        }
+
+        .video-status-badge.disconnected {
+            background: rgba(239, 68, 68, 0.9);
+        }
+
+        /* Transcript History Styles */
+        .transcript-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            grid-column: span 2;
+            max-height: 500px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .transcript-history {
+            flex: 1;
+            overflow-y: auto;
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 400px;
+        }
+
+        .transcript-history::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .transcript-history::-webkit-scrollbar-track {
+            background: #e5e7eb;
+            border-radius: 4px;
+        }
+
+        .transcript-history::-webkit-scrollbar-thumb {
+            background: #9ca3af;
+            border-radius: 4px;
+        }
+
+        .transcript-history::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+
+        .transcript-entry {
+            margin-bottom: 12px;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .transcript-entry.speaker-doctor {
+            border-left-color: #3b82f6;
+        }
+
+        .transcript-entry.speaker-patient {
+            border-left-color: #10b981;
+        }
+
+        .transcript-entry.speaker-interpreter {
+            border-left-color: #8b5cf6;
+        }
+
+        .transcript-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .transcript-speaker {
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .transcript-speaker.doctor {
+            color: #3b82f6;
+        }
+
+        .transcript-speaker.patient {
+            color: #10b981;
+        }
+
+        .transcript-speaker.interpreter {
+            color: #8b5cf6;
+        }
+
+        .transcript-time {
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .transcript-text {
+            color: #374151;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .transcript-empty {
+            text-align: center;
+            color: #9ca3af;
+            font-style: italic;
+            padding: 40px 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏥 HIPAA Compliance & Medical Interpreter QA Dashboard</h1>
+            <div>
+                <span class="connection-status status-disconnected" id="connectionStatus">Disconnected</span>
+                <span id="sessionInfo" style="margin-left: 20px; color: #666;"></span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <input type="text" id="streamKeyInput" placeholder="Enter Stream Key" value="meeting-5">
+            <input type="number" id="fpsInput" placeholder="FPS" value="1" min="0.5" max="5" step="0.5">
+            <button id="startBtn" onclick="startAnalysis()">Start Analysis</button>
+            <button id="stopBtn" onclick="stopAnalysis()" disabled>Stop Analysis</button>
+        </div>
+
+        <div class="dashboard">
+            <!-- HIPAA Compliance Card -->
+            <div class="card">
+                <h3>HIPAA Compliance</h3>
+                <div id="complianceScore" class="metric">
+                    <span class="metric-label">Compliance Score</span>
+                    <span class="metric-value">-</span>
+                </div>
+                <div id="complianceStatus" class="compliance-status" style="display: none;">
+                    Waiting for analysis...
+                </div>
+                <div id="privacyViolations" class="metric">
+                    <span class="metric-label">Privacy Violations</span>
+                    <span class="metric-value">-</span>
+                </div>
+                <div id="environmentSecure" class="metric">
+                    <span class="metric-label">Environment Secure</span>
+                    <span class="metric-value">-</span>
+                </div>
+                <ul id="violationsList" class="violations-list">
+                    <li>No violations detected</li>
+                </ul>
+            </div>
+
+            <!-- Person Detection Card -->
+            <div class="card">
+                <h3>Person Detection</h3>
+                <div id="personCount" class="metric">
+                    <span class="metric-label">Total People</span>
+                    <span class="metric-value">-</span>
+                </div>
+                <div id="requiredRoles" class="metric">
+                    <span class="metric-label">Required Roles</span>
+                    <span class="metric-value"></span>
+                </div>
+                <ul id="rolesList" class="person-list">
+                    <li class="missing">Patient</li>
+                    <li class="missing">Doctor</li>
+                    <li class="missing">Interpreter</li>
+                </ul>
+                <div id="unauthorizedPersons" class="metric" style="margin-top: 15px;">
+                    <span class="metric-label">Unauthorized Persons</span>
+                    <span class="metric-value" style="color: #10b981;">None</span>
+                </div>
+            </div>
+
+            <!-- Medical Interpreter QA Card -->
+            <div class="card">
+                <h3>Medical Interpreter QA</h3>
+                <div id="professionalismScore" class="metric">
+                    <span class="metric-label">Professionalism Score</span>
+                    <span class="metric-value">-</span>
+                </div>
+                <div id="interpreterPresent" class="metric">
+                    <span class="metric-label">Interpreter Present</span>
+                    <span class="metric-value">-</span>
+                </div>
+                <div id="interpreterEngaged" class="metric">
+                    <span class="metric-label">Interpreter Engaged</span>
+                    <span class="metric-value">-</span>
+                </div>
+                <ul id="interpreterIssues" class="violations-list" style="margin-top: 15px;">
+                    <li>No issues detected</li>
+                </ul>
+            </div>
+
+            <!-- Speed Comparison Card -->
+            <div class="card">
+                <h3>API Speed Comparison</h3>
+                <div class="speed-comparison">
+                    <div class="speed-item">
+                        <div class="time" id="viTime">-</div>
+                        <div class="label">Video Intelligence</div>
+                    </div>
+                    <div class="speed-item">
+                        <div class="time" id="geminiTime">-</div>
+                        <div class="label">Gemini</div>
+                    </div>
+                </div>
+                <div id="fasterApi" style="text-align: center; margin-top: 15px;"></div>
+                <div class="stats-grid" id="statsGrid" style="display: none;">
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalFrames">0</div>
+                        <div class="stat-label">Frames Analyzed</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="avgViTime">0</div>
+                        <div class="stat-label">Avg VI Time</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="avgGeminiTime">0</div>
+                        <div class="stat-label">Avg Gemini Time</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Section -->
+        <div class="alerts">
+            <h3 style="margin-bottom: 15px;">Compliance Alerts</h3>
+            <div id="alertsContainer">
+                <div class="empty-state">No alerts yet</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+        let frameCount = 0;
+        let viTimes = [];
+        let geminiTimes = [];
+
+        async function startAnalysis() {
+            const streamKey = document.getElementById('streamKeyInput').value;
+            const fps = document.getElementById('fpsInput').value;
+
+            if (!streamKey) {
+                alert('Please enter a stream key');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/analysis/start/${streamKey}?fps=${fps}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                sessionId = data.session_id;
+                document.getElementById('sessionInfo').textContent = `Session: ${sessionId}`;
+
+                connectWebSocket(sessionId);
+
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('streamKeyInput').disabled = true;
+                document.getElementById('fpsInput').disabled = true;
+            } catch (error) {
+                console.error('Error starting analysis:', error);
+                alert('Failed to start analysis: ' + error.message);
+            }
+        }
+
+        function stopAnalysis() {
+            if (ws) {
+                ws.close();
+            }
+            if (sessionId) {
+                fetch(`/api/analysis/stop/${sessionId}`, { method: 'POST' });
+            }
+
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('streamKeyInput').disabled = false;
+            document.getElementById('fpsInput').disabled = false;
+            document.getElementById('connectionStatus').textContent = 'Disconnected';
+            document.getElementById('connectionStatus').className = 'connection-status status-disconnected';
+            sessionId = null;
+        }
+
+        function connectWebSocket(sessionId) {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/api/analysis/stream/${sessionId}`;
+
+            document.getElementById('connectionStatus').textContent = 'Connecting...';
+            document.getElementById('connectionStatus').className = 'connection-status status-connecting';
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').className = 'connection-status status-connected';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleAnalysisResult(data);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                document.getElementById('connectionStatus').textContent = 'Error';
+                document.getElementById('connectionStatus').className = 'connection-status status-disconnected';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('connectionStatus').className = 'connection-status status-disconnected';
+            };
+        }
+
+        function handleAnalysisResult(msg) {
+            // New Event Format (event/data)
+            if (msg.event === 'history_init') {
+                const initData = msg.data;
+                if (initData.history && initData.history.length > 0) {
+                    initData.history.forEach(item => {
+                        handleAnalysisResult({ event: 'transcript_final', data: item });
+                    });
+                }
+                if (initData.latest_analysis) {
+                    handleAnalysisResult({ event: 'analysis_update', data: initData.latest_analysis });
+                }
+                return;
+            }
+
+            if (msg.event === 'analysis_update') {
+                frameCount++;
+                // Normalize new analysis structure to old one expected by updateDashboard
+                const normalized = {
+                    combined_analysis: msg.data.analysis ? {
+                        hipaa_compliance: {
+                            compliance_score: msg.data.analysis.confidence,
+                            compliance_status: msg.data.analysis.risk_level === 'High' ? 'NON_COMPLIANT' : 'COMPLIANT'
+                        },
+                        summary: msg.data.analysis.summary,
+                        speaker_behavior: msg.data.raw_details?.speaker_behavior
+                    } : {},
+                    transcript: msg.data.text,
+                    timestamp: msg.data.timestamp
+                };
+                updateDashboard(normalized);
+                return;
+            }
+
+            if (msg.event === 'transcript_final') {
+                // Add alert for new transcript
+                addAlert({
+                    severity: 'INFO',
+                    message: `[${msg.data.speaker_role}] ${msg.data.text}`,
+                    timestamp: msg.data.timestamp
+                });
+                return;
+            }
+
+            // Legacy Format handling (type/data)
+            if (msg.type === 'analysis_result') {
+                frameCount++;
+                updateDashboard(msg.data);
+            } else if (msg.type === 'compliance_alert') {
+                addAlert(msg);
+            } else if (msg.type === 'error') {
+                addAlert({
+                    severity: 'critical',
+                    message: msg.message,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        }
+
+        function updateDashboard(analysis) {
+            // HIPAA Compliance
+            const compliance = analysis.combined_analysis?.hipaa_compliance || {};
+            const score = compliance.compliance_score;
+            if (score !== undefined) {
+                document.getElementById('complianceScore').querySelector('.metric-value').textContent = score;
+                document.getElementById('complianceScore').querySelector('.metric-value').className =
+                    'metric-value ' + getScoreClass(score);
+            }
+
+            const status = analysis.combined_analysis?.compliance_status;
+            if (status) {
+                const statusEl = document.getElementById('complianceStatus');
+                statusEl.textContent = status.replace('_', ' ');
+                statusEl.className = 'compliance-status status-' + status.toLowerCase().replace('_', '-');
+                statusEl.style.display = 'block';
+            }
+
+            const privacyViolations = analysis.gemini?.hipaa_compliance?.privacy_violations;
+            if (privacyViolations !== undefined) {
+                document.getElementById('privacyViolations').querySelector('.metric-value').textContent =
+                    privacyViolations ? 'Yes' : 'No';
+                document.getElementById('privacyViolations').querySelector('.metric-value').style.color =
+                    privacyViolations ? '#ef4444' : '#10b981';
+            }
+
+            const envSecure = analysis.gemini?.hipaa_compliance?.environment_secure;
+            if (envSecure !== undefined) {
+                document.getElementById('environmentSecure').querySelector('.metric-value').textContent =
+                    envSecure ? 'Yes' : 'No';
+                document.getElementById('environmentSecure').querySelector('.metric-value').style.color =
+                    envSecure ? '#10b981' : '#ef4444';
+            }
+
+            const violations = compliance.violations || [];
+            const violationsList = document.getElementById('violationsList');
+            violationsList.innerHTML = '';
+            if (violations.length === 0) {
+                violationsList.innerHTML = '<li>No violations detected</li>';
+            } else {
+                violations.forEach(v => {
+                    const li = document.createElement('li');
+                    li.textContent = v;
+                    violationsList.appendChild(li);
+                });
+            }
+
+            // Person Detection
+            const personCount = analysis.combined_analysis?.person_count || analysis.gemini?.person_count;
+            if (personCount !== undefined) {
+                document.getElementById('personCount').querySelector('.metric-value').textContent = personCount;
+            }
+
+            const roles = analysis.gemini?.required_roles_present || {};
+            const rolesList = document.getElementById('rolesList');
+            ['patient', 'doctor', 'interpreter'].forEach(role => {
+                const li = rolesList.querySelector(`li:nth-child(${['patient', 'doctor', 'interpreter'].indexOf(role) + 1})`);
+                if (li) {
+                    li.className = roles[role] ? '' : 'missing';
+                }
+            });
+
+            const unauthorized = analysis.combined_analysis?.unauthorized_persons;
+            if (unauthorized !== undefined) {
+                const el = document.getElementById('unauthorizedPersons').querySelector('.metric-value');
+                el.textContent = unauthorized ? 'Detected' : 'None';
+                el.style.color = unauthorized ? '#ef4444' : '#10b981';
+            }
+
+            // Interpreter QA
+            const qa = analysis.combined_analysis?.interpreter_qa || analysis.gemini?.interpreter_qa || {};
+            if (qa.professionalism_score !== undefined) {
+                const scoreEl = document.getElementById('professionalismScore').querySelector('.metric-value');
+                scoreEl.textContent = qa.professionalism_score;
+                scoreEl.className = 'metric-value ' + getScoreClass(qa.professionalism_score);
+            }
+
+            if (qa.is_present !== undefined) {
+                document.getElementById('interpreterPresent').querySelector('.metric-value').textContent =
+                    qa.is_present ? 'Yes' : 'No';
+            }
+
+            if (qa.is_engaged !== undefined) {
+                document.getElementById('interpreterEngaged').querySelector('.metric-value').textContent =
+                    qa.is_engaged ? 'Yes' : 'No';
+            }
+
+            const issues = qa.issues || [];
+            const issuesList = document.getElementById('interpreterIssues');
+            issuesList.innerHTML = '';
+            if (issues.length === 0) {
+                issuesList.innerHTML = '<li>No issues detected</li>';
+            } else {
+                issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    issuesList.appendChild(li);
+                });
+            }
+
+            // Speed Comparison
+            const speed = analysis.speed_comparison || {};
+            if (speed.vi_time !== undefined) {
+                viTimes.push(speed.vi_time);
+                document.getElementById('viTime').textContent = (speed.vi_time * 1000).toFixed(0) + 'ms';
+            }
+            if (speed.gemini_time !== undefined) {
+                geminiTimes.push(speed.gemini_time);
+                document.getElementById('geminiTime').textContent = (speed.gemini_time * 1000).toFixed(0) + 'ms';
+            }
+
+            if (speed.faster_api) {
+                const fasterEl = document.getElementById('fasterApi');
+                fasterEl.innerHTML = `<div class="faster-badge">${speed.faster_api.toUpperCase()} is faster</div>`;
+            }
+
+            // Update stats
+            document.getElementById('totalFrames').textContent = frameCount;
+            if (viTimes.length > 0) {
+                const avgVi = viTimes.reduce((a, b) => a + b, 0) / viTimes.length;
+                document.getElementById('avgViTime').textContent = (avgVi * 1000).toFixed(0) + 'ms';
+            }
+            if (geminiTimes.length > 0) {
+                const avgGemini = geminiTimes.reduce((a, b) => a + b, 0) / geminiTimes.length;
+                document.getElementById('avgGeminiTime').textContent = (avgGemini * 1000).toFixed(0) + 'ms';
+            }
+            document.getElementById('statsGrid').style.display = 'grid';
+        }
+
+        function getScoreClass(score) {
+            if (score >= 80) return 'score-high';
+            if (score >= 60) return 'score-medium';
+            return 'score-low';
+        }
+
+        function addAlert(alertData) {
+            const container = document.getElementById('alertsContainer');
+            if (container.querySelector('.empty-state')) {
+                container.innerHTML = '';
+            }
+
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-' + (alertData.severity === 'CRITICAL_VIOLATIONS' ? 'critical' :
+                alertData.severity === 'NON_COMPLIANT' ? 'warning' : 'info');
+
+            const time = new Date(alertData.timestamp || Date.now()).toLocaleTimeString();
+            alert.innerHTML = `
+                <strong>${alertData.severity || 'Alert'}</strong>
+                <div style="margin-top: 5px;">${alertData.message || JSON.stringify(alertData.details || {})}</div>
+                <div class="alert-time">${time}</div>
+            `;
+
+            container.insertBefore(alert, container.firstChild);
+
+            // Keep only last 20 alerts
+            while (container.children.length > 20) {
+                container.removeChild(container.lastChild);
+            }
+        }
+    </script>
+</body>
+
+</html>
